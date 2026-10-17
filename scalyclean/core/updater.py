@@ -27,6 +27,11 @@ from scalyclean.core.update_config import (
 
 ProgressCallback = Callable[[int, int | None], None]  # bytes_done, bytes_total or None
 
+# Как часто exe спрашивает GitHub (мс / сек)
+UPDATE_POLL_MS = 60_000
+UPDATE_MIN_GAP_SEC = 20
+UPDATE_NETWORK_TIMEOUT = 12.0
+
 
 @dataclass(frozen=True)
 class UpdateInfo:
@@ -349,9 +354,16 @@ def _pick_newest(*items: UpdateInfo | None) -> UpdateInfo | None:
     return best
 
 
-def fetch_best_available_update(timeout: float = 20.0) -> UpdateInfo | None:
-    release = fetch_github_latest_release(timeout)
-    manifest, _err = _fetch_manifest_json_remote(timeout)
+def fetch_best_available_update(timeout: float = UPDATE_NETWORK_TIMEOUT) -> UpdateInfo | None:
+    from concurrent.futures import ThreadPoolExecutor
+
+    release: UpdateInfo | None = None
+    manifest: UpdateInfo | None = None
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        f_rel = pool.submit(fetch_github_latest_release, timeout)
+        f_man = pool.submit(_fetch_manifest_json_remote, timeout)
+        release = f_rel.result()
+        manifest, _err = f_man.result()
     best = _pick_newest(release, manifest)
     if best:
         return best

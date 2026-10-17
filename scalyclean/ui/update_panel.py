@@ -33,7 +33,7 @@ class UpdatePanel(ctk.CTkFrame):
 
         ctk.CTkLabel(
             self,
-            text="Достаточно одного exe. Новые версии подтягиваются с GitHub автоматически.",
+            text="Проверка GitHub каждую ~1 мин + при открытии этой вкладки и при возврате в окно.",
             justify="left",
             text_color="#9aa0a6",
         ).pack(anchor="w", padx=12, pady=8)

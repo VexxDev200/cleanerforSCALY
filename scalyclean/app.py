@@ -10,6 +10,8 @@ import psutil
 from scalyclean import __version__
 from scalyclean.core.admin import is_admin
 from scalyclean.core.updater import (
+    UPDATE_MIN_GAP_SEC,
+    UPDATE_POLL_MS,
     check_for_update,
     diagnose_update,
     install_update,
@@ -65,7 +67,8 @@ class ScalyCleanerApp(ctk.CTk):
         self._on_drive_changed(self._analyzer.get_selected_drive())
         self.refresh_stats()
         if self._should_check_updates():
-            threading.Thread(target=self._check_updates_worker, daemon=True).start()
+            self._request_update_check(force=True)
+            self.after(15_000, lambda: self._request_update_check(force=True))
 
     def _build_header(self) -> None:
         top = ctk.CTkFrame(self, fg_color="transparent")
@@ -175,26 +178,35 @@ class ScalyCleanerApp(ctk.CTk):
             on_update_offered=self._offer_update,
         )
         self._updates.pack(fill="both", expand=True, padx=4, pady=4)
+        self._tabs.configure(command=self._on_tab_changed)
+
+    def _on_tab_changed(self) -> None:
+        if self._tabs.get() == "Обновления":
+            self._request_update_check(force=True)
+        if self._tabs.get() == "Главная":
+            self.refresh_stats()
+
+    def _request_update_check(self, force: bool = False) -> None:
+        if not self._should_check_updates() or self._busy:
+            return
+        now = time.time()
+        if not force and now - self._last_update_check < UPDATE_MIN_GAP_SEC:
+            return
+        self._last_update_check = now
+        threading.Thread(target=self._check_updates_worker, daemon=True).start()
 
     def _schedule_update_poll(self) -> None:
         if not is_frozen_app():
             return
-        interval_ms = 20 * 60 * 1000
-        self.after(interval_ms, self._poll_updates)
+        self.after(UPDATE_POLL_MS, self._poll_updates)
 
     def _poll_updates(self) -> None:
-        if is_frozen_app() and not self._busy:
-            threading.Thread(target=self._check_updates_worker, daemon=True).start()
+        self._request_update_check()
         self._schedule_update_poll()
 
     def _on_app_focus(self, _event) -> None:
-        if not is_frozen_app() or self._busy:
-            return
-        now = time.time()
-        if now - self._last_update_check < 120:
-            return
-        self._last_update_check = now
-        threading.Thread(target=self._check_updates_worker, daemon=True).start()
+        if is_frozen_app():
+            self._request_update_check()
 
     def _should_check_updates(self) -> bool:
         if is_frozen_app():
