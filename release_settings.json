@@ -3,5 +3,5 @@
   "github_repo": "cleanerforSCALY",
   "branch": "main",
   "exe_name": "ScalyCleaner.exe",
-  "release_notes": "v1.0.7 — тестовое обновление для проверки кнопки «Обновить»."
+  "release_notes": "v1.0.8 — фикс запуска от админа и ошибки Python/модуль."
 }

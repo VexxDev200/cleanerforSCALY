@@ -1,7 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 import os
 
-from PyInstaller.utils.hooks import collect_all
+from PyInstaller.utils.hooks import collect_all, collect_submodules
 
 spec_dir = os.path.dirname(os.path.abspath(SPEC))
 assets_dir = os.path.join(spec_dir, 'assets')
@@ -12,7 +12,12 @@ datas = [
     (os.path.join(spec_dir, 'release_settings.json'), '.'),
 ]
 binaries = []
-hiddenimports = ['PIL._tkinter_finder']
+hiddenimports = [
+    'PIL._tkinter_finder',
+    'scalyclean',
+    'scalyclean._integrity',
+]
+hiddenimports += collect_submodules('scalyclean')
 tmp_ret = collect_all('customtkinter')
 datas += tmp_ret[0]
 binaries += tmp_ret[1]

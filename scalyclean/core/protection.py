@@ -201,8 +201,7 @@ def _parent_suspicious() -> bool:
         pname = (parent.name() or "").lower()
         if pname in _HOSTILE_EXE:
             return True
-        if pname in ("python.exe", "pythonw.exe") and _frozen():
-            return True
+        # не блокируем запуск из проводника/терминала через оболочки
     except Exception:
         pass
     return False

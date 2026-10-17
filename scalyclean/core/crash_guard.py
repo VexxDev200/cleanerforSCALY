@@ -17,7 +17,16 @@ def install_crash_guard() -> None:
         except OSError:
             pass
         try:
-            messagebox.showerror("SCALY — ошибка", text[:2000])
+            if issubclass(exctype, ModuleNotFoundError):
+                msg = (
+                    "Не хватает модуля в сборке.\n"
+                    "Скачай свежий ScalyCleaner.exe с GitHub Releases\n"
+                    "или запусти dist\\ScalyCleaner.exe из проекта.\n\n"
+                    f"{value}"
+                )
+                messagebox.showerror("SCALY Cleaner", msg[:2000])
+            else:
+                messagebox.showerror("SCALY — ошибка", text[:2000])
         except Exception:
             pass
         sys.__excepthook__(exctype, value, tb)
