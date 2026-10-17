@@ -3,5 +3,5 @@
   "github_repo": "cleanerforSCALY",
   "branch": "main",
   "exe_name": "ScalyCleaner.exe",
-  "release_notes": "v1.0.6 — зелёная иконка S, автообновление, фикс установки без краша."
+  "release_notes": "v1.0.7 — тестовое обновление для проверки кнопки «Обновить»."
 }
