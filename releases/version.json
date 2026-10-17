@@ -1,7 +1,7 @@
 {
-  "version": "1.0.8",
-  "download_url": "https://github.com/VexxDev200/cleanerforSCALY/releases/download/v1.0.8/ScalyCleaner.exe",
+  "version": "1.0.10",
+  "download_url": "https://github.com/VexxDev200/cleanerforSCALY/releases/download/v1.0.10/ScalyCleaner.exe",
   "file_name": "ScalyCleaner.exe",
-  "notes": "v1.0.8 — фикс запуска от админа и «модуль Python не найден».",
-  "sha256": "2b1c4ba216c1781257a7d3e1009e26dc6c48a0327865a640093d97f7efd3b611"
+  "notes": "v1.0.10 — тест автообновления.",
+  "sha256": "e482f99118403ab04a00c9ca12603d42790690397285111130d6f17f1a1845b9"
 }
