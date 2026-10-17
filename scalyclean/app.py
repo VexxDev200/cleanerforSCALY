@@ -280,6 +280,8 @@ class ScalyCleanerApp(ctk.CTk):
                     self.after(0, lambda: self._update_progress_set(done, total))
 
                 install_update(info, on_progress=prog)
+            except SystemExit:
+                return
             except Exception as e:
                 err = str(e)
             if err:

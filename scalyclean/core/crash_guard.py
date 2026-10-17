@@ -25,6 +25,10 @@ def install_crash_guard() -> None:
     sys.excepthook = hook
 
     def thread_hook(args):
+        if args.exc_type is SystemExit:
+            code = args.exc_value.code if isinstance(args.exc_value, SystemExit) else 0
+            if code in (0, None):
+                return
         hook(args.exc_type, args.exc_value, args.exc_traceback)
 
     threading.excepthook = thread_hook  # type: ignore[attr-defined]

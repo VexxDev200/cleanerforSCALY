@@ -648,7 +648,8 @@ def apply_downloaded_update(downloaded: Path, target: Path | None = None) -> Non
         close_fds=True,
         creationflags=flags,
     )
-    sys.exit(0)
+    # sys.exit из фонового потока не гасит процесс — только os._exit
+    os._exit(0)
 
 
 def install_update(

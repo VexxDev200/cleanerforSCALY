@@ -55,13 +55,12 @@ def main() -> None:
         im = draw_logo(s)
         im.save(ASSETS / f"logo_{s}.png")
         images.append(im)
-    ico_sizes = [(16, 16), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)]
-    ico_images = [draw_logo(s).convert("RGBA") for s, _ in ico_sizes]
-    ico_images[0].save(
+    ico_sizes = [16, 32, 48, 64, 128, 256]
+    master = draw_logo(256).convert("RGBA")
+    master.save(
         ASSETS / "logo.ico",
         format="ICO",
-        sizes=ico_sizes,
-        append_images=ico_images[1:],
+        sizes=[(s, s) for s in ico_sizes],
     )
     draw_logo(512).save(ASSETS / "logo_512.png")
     print(f"Brand assets: {ASSETS}")
