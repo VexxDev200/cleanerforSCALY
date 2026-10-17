@@ -1,0 +1,14 @@
+__pycache__/
+*.py[cod]
+*.pyo
+.Python
+build/
+dist/
+*.spec.bak
+.venv/
+venv/
+.env
+.env.*
+scalyclean_crash.log
+*.log
+ScalyCleaner_update/
