@@ -1,0 +1,11 @@
+AUTO UPDATE (for you)
+=====================
+1. Change code in the project.
+2. git add -A
+3. git commit -m "your message"
+4. git push origin main
+
+GitHub Actions will: bump version, build exe, update manifest, publish release.
+Users with old exe get the "Update" button within ~20 min (or on next app start).
+
+No publish_all.bat needed unless you build locally.

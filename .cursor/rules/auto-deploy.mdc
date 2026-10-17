@@ -1,0 +1,19 @@
+---
+description: After changing SCALY Cleaner app code, auto-push to GitHub for user updates
+globs:
+  - scalyclean/**
+  - main.py
+  - assets/**
+  - ScalyCleaner.spec
+  - tools/build_release.py
+  - .github/workflows/**
+alwaysApply: false
+---
+
+When you finish editing files that affect the released app (under globs above), run once before ending your turn:
+
+`python tools/auto_deploy.py`
+
+from the project root `C:\Documents\cleanerforSCALY`. Do not ask the user to run git manually. If push fails (auth/network), report the error briefly.
+
+Do not auto-deploy for question-only replies or docs-only edits outside release paths.

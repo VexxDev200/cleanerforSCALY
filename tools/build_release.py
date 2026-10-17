@@ -14,6 +14,10 @@ import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from tools.integrity_manifest import write_integrity_module  # noqa: E402
 
 
 def load_settings() -> dict:
@@ -83,25 +87,16 @@ def write_manifest(version: str, settings: dict, sha: str) -> dict:
     return payload
 
 
-def make_portable(exe: Path, manifest: dict, settings: dict) -> Path:
-    out_dir = ROOT / "dist" / "ScalyCleaner-portable"
-    if out_dir.exists():
-        shutil.rmtree(out_dir)
-    out_dir.mkdir(parents=True)
-    shutil.copy2(exe, out_dir / manifest["file_name"])
-    (out_dir / "version.json").write_text(
-        json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
-    url = manifest_url(settings)
-    if url:
-        (out_dir / "update_url.txt").write_text(url + "\n", encoding="utf-8")
+def make_release_zip(exe: Path, manifest: dict) -> Path:
+    """Только один exe в ZIP — пользователям не нужны sidecar-файлы."""
     zip_path = ROOT / "dist" / f"ScalyCleaner-v{manifest['version']}-win64.zip"
     if zip_path.is_file():
         zip_path.unlink()
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
-        for f in out_dir.iterdir():
-            zf.write(f, arcname=f.name)
+        zf.write(exe, arcname=manifest["file_name"])
+    legacy = ROOT / "dist" / "ScalyCleaner-portable"
+    if legacy.is_dir():
+        shutil.rmtree(legacy, ignore_errors=True)
     return zip_path
 
 
@@ -162,14 +157,18 @@ def main() -> None:
     settings = load_settings()
     version = read_version()
     print(f"Build SCALY Cleaner v{version}...")
+    subprocess.check_call([sys.executable, str(ROOT / "tools" / "generate_brand_assets.py")], cwd=ROOT)
+    write_integrity_module()
     exe = run_build()
     sha = sha256_file(exe)
     manifest = write_manifest(version, settings, sha)
-    zip_path = make_portable(exe, manifest, settings)
+    zip_path = make_release_zip(exe, manifest)
     print(f"EXE: {exe}")
     print(f"ZIP: {zip_path}")
     print(f"Manifest: {ROOT / 'releases' / 'version.json'}")
     print(f"SHA256: {sha}")
+    print("After release: git add releases/version.json && git commit && git push origin main")
+    print("Verify: python tools/verify_auto_update.py")
     try_github_release(exe, manifest, settings)
 
 

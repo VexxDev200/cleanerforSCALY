@@ -1,5 +1,6 @@
 import os
 import threading
+import time
 import tkinter as tk
 from tkinter import messagebox
 
@@ -10,6 +11,7 @@ from scalyclean import __version__
 from scalyclean.core.admin import is_admin
 from scalyclean.core.updater import (
     check_for_update,
+    diagnose_update,
     install_update,
     is_frozen_app,
 )
@@ -18,8 +20,10 @@ from scalyclean.modules.disk_analyzer import target_matches_drive
 from scalyclean.modules.disk_cleaner import clean_targets, scan_all
 from scalyclean.modules.disk_targets import all_disk_targets, targets_for_drive
 from scalyclean.modules.volumes import default_drive
+from scalyclean.core.branding import apply_window_icon, load_logo_ctk
 from scalyclean.ui.analyzer_panel import AnalyzerPanel
 from scalyclean.ui.games_panel import GamesPanel
+from scalyclean.ui.update_panel import UpdatePanel
 from scalyclean.modules.ram_cleaner import clean_ram, get_ram_stats
 from scalyclean.modules.system_cleaner import clean_old_windows_logs, start_dism_component_cleanup
 from scalyclean.modules.vram_cleaner import clean_vram_caches, flush_dwm, inspect_vram
@@ -42,6 +46,7 @@ class ScalyCleanerApp(ctk.CTk):
         self._gentle_var = tk.BooleanVar(value=True)
         self._pending_update = None
         self._update_progress_win: ctk.CTkToplevel | None = None
+        self._last_update_check = 0.0
 
         self._build_header()
         self._build_stats_row()
@@ -49,7 +54,10 @@ class ScalyCleanerApp(ctk.CTk):
         self._build_log()
         self._build_footer()
 
+        apply_window_icon(self)
+        self.bind("<FocusIn>", self._on_app_focus)
         self.after(200, self._boot_refresh)
+        self._schedule_update_poll()
 
     def _boot_refresh(self) -> None:
         self._on_drive_changed(self._analyzer.get_selected_drive())
@@ -62,6 +70,9 @@ class ScalyCleanerApp(ctk.CTk):
         top.pack(fill="x", padx=16, pady=(12, 4))
         title_row = ctk.CTkFrame(top, fg_color="transparent")
         title_row.pack(side="left")
+        logo = load_logo_ctk(40)
+        if logo:
+            ctk.CTkLabel(title_row, text="", image=logo).pack(side="left", padx=(0, 10))
         ctk.CTkLabel(
             title_row,
             text="SCALY Cleaner",
@@ -75,8 +86,8 @@ class ScalyCleanerApp(ctk.CTk):
         ).pack(side="left", padx=(10, 0))
         self._update_btn = ctk.CTkButton(
             title_row,
-            text="Скачать обновление",
-            width=160,
+            text="Обновить",
+            width=120,
             fg_color="#16a34a",
             hover_color="#15803d",
             command=self._start_app_update,
@@ -103,6 +114,12 @@ class ScalyCleanerApp(ctk.CTk):
             text="Бережный режим (не трогать игры и лаунчеры)",
             variable=self._gentle_var,
         ).pack(side="right", padx=8)
+        ctk.CTkButton(
+            row,
+            text="Проверить обновления",
+            width=150,
+            command=self._manual_update_check,
+        ).pack(side="right", padx=6)
         ctk.CTkButton(row, text="Статус", width=88, command=self.refresh_stats).pack(
             side="right", padx=12
         )
@@ -117,6 +134,7 @@ class ScalyCleanerApp(ctk.CTk):
         tab_ram = self._tabs.add("RAM")
         tab_vram = self._tabs.add("VRAM / GPU")
         tab_all = self._tabs.add("Всё сразу")
+        tab_updates = self._tabs.add("Обновления")
 
         self._analyzer = AnalyzerPanel(
             tab_analyze,
@@ -139,6 +157,34 @@ class ScalyCleanerApp(ctk.CTk):
         self._build_vram_tab(tab_vram)
         self._build_all_tab(tab_all)
 
+        self._updates = UpdatePanel(
+            tab_updates,
+            on_log=self.log,
+            on_status=lambda t: self._status.configure(text=t),
+            on_update_offered=self._offer_update,
+        )
+        self._updates.pack(fill="both", expand=True, padx=4, pady=4)
+
+    def _schedule_update_poll(self) -> None:
+        if not is_frozen_app():
+            return
+        interval_ms = 20 * 60 * 1000
+        self.after(interval_ms, self._poll_updates)
+
+    def _poll_updates(self) -> None:
+        if is_frozen_app() and not self._busy:
+            threading.Thread(target=self._check_updates_worker, daemon=True).start()
+        self._schedule_update_poll()
+
+    def _on_app_focus(self, _event) -> None:
+        if not is_frozen_app() or self._busy:
+            return
+        now = time.time()
+        if now - self._last_update_check < 120:
+            return
+        self._last_update_check = now
+        threading.Thread(target=self._check_updates_worker, daemon=True).start()
+
     def _should_check_updates(self) -> bool:
         if is_frozen_app():
             return True
@@ -150,12 +196,38 @@ class ScalyCleanerApp(ctk.CTk):
         if info:
             self.after(0, lambda: self._offer_update(info))
 
+    def _manual_update_check(self) -> None:
+        if self._busy:
+            messagebox.showwarning("SCALY Cleaner", "Дождись окончания текущей операции.")
+            return
+        self._status.configure(text="Проверка обновлений…")
+
+        def work() -> None:
+            diag = diagnose_update()
+            info = check_for_update()
+            self.after(0, lambda: self._show_update_diagnosis(diag, info))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _show_update_diagnosis(self, diag, info) -> None:
+        for line in diag.summary_lines():
+            self.log(f"[Обновление] {line}")
+        text = "\n".join(diag.summary_lines())
+        if info:
+            self._offer_update(info)
+            messagebox.showinfo("Обновления", text + "\n\nМожно нажать «Скачать обновление» в шапке.")
+        elif diag.errors:
+            messagebox.showwarning("Обновления", text)
+        else:
+            messagebox.showinfo("Обновления", text + "\n\nУ тебя последняя версия.")
+        self._status.configure(text="Готово")
+
     def _offer_update(self, info) -> None:
         self._pending_update = info
         self._update_btn.pack(side="left", padx=(12, 0))
         short = info.notes[:120] + ("…" if len(info.notes) > 120 else "")
         self.log(f"[Обновление] Доступна v{info.version}. {short}")
-        self._status.configure(text=f"Доступно обновление v{info.version}")
+        self._status.configure(text=f"Доступно обновление v{info.version} — нажми «Обновить»")
 
     def _start_app_update(self) -> None:
         if not self._pending_update:

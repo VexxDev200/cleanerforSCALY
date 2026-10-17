@@ -1,14 +1,19 @@
 # -*- mode: python ; coding: utf-8 -*-
-from pathlib import Path
+from PyInstaller.utils.hooks import collect_all
 
-root = Path(SPECPATH)
+datas = []
+binaries = []
+hiddenimports = ['PIL._tkinter_finder']
+tmp_ret = collect_all('customtkinter')
+datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
+
 
 a = Analysis(
     ['main.py'],
-    pathex=[str(root)],
-    binaries=[],
-    datas=[(str(root / 'release_settings.json'), '.')],
-    hiddenimports=['PIL._tkinter_finder'],
+    pathex=[],
+    binaries=binaries,
+    datas=datas,
+    hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -37,5 +42,4 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    uac_admin=True,
 )

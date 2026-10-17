@@ -1,0 +1,56 @@
+name: Auto release on push
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "scalyclean/**"
+      - "main.py"
+      - "requirements.txt"
+      - "assets/**"
+      - "ScalyCleaner.spec"
+      - "tools/build_release.py"
+      - "tools/integrity_manifest.py"
+      - ".github/workflows/auto-release.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    if: ${{ !contains(github.event.head_commit.message, '[skip ci]') }}
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Bump version
+        run: python tools/ci_prepare_release.py
+
+      - name: Build exe and manifest
+        run: python tools/build_release.py
+
+      - name: Commit version files
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add releases/version.json scalyclean/__init__.py
+          VER=$(python -c "from scalyclean import __version__; print(__version__)")
+          git diff --staged --quiet || git commit -m "chore(release): v${VER} [skip ci]"
+          git push
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          VER=$(python -c "from scalyclean import __version__; print(__version__)")
+          TAG="v${VER}"
+          gh release view "$TAG" 2>/dev/null && gh release upload "$TAG" dist/ScalyCleaner.exe "dist/ScalyCleaner-v${VER}-win64.zip" --clobber || \
+          gh release create "$TAG" dist/ScalyCleaner.exe "dist/ScalyCleaner-v${VER}-win64.zip" --title "SCALY Cleaner ${TAG}" --generate-notes

@@ -43,3 +43,12 @@ def manifest_url_from_settings(settings: dict) -> str:
 
 
 UPDATE_MANIFEST_URL = manifest_url_from_settings(load_release_settings())
+
+
+def github_repo_slug() -> tuple[str, str] | None:
+    settings = load_release_settings()
+    user = str(settings.get("github_user", "")).strip()
+    repo = str(settings.get("github_repo", "")).strip()
+    if user and repo:
+        return user, repo
+    return None

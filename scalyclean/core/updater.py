@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import os
@@ -9,15 +10,20 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 import urllib.error
 import urllib.request
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 from urllib.parse import urlparse
 
 from scalyclean import __version__
-from scalyclean.core.update_config import DEFAULT_RELEASE_EXE_NAME, UPDATE_MANIFEST_URL
+from scalyclean.core.update_config import (
+    DEFAULT_RELEASE_EXE_NAME,
+    UPDATE_MANIFEST_URL,
+    github_repo_slug,
+)
 
 ProgressCallback = Callable[[int, int | None], None]  # bytes_done, bytes_total or None
 
@@ -29,6 +35,34 @@ class UpdateInfo:
     notes: str
     file_name: str
     sha256: str | None = None
+    source: str = "remote"
+
+
+@dataclass
+class UpdateDiagnosis:
+    local_version: str
+    manifest_url: str | None
+    manifest_source: str
+    remote_version: str | None
+    update_available: bool
+    download_reachable: bool
+    download_bytes: int | None
+    errors: list[str] = field(default_factory=list)
+
+    def summary_lines(self) -> list[str]:
+        lines = [
+            f"Локальная версия: {self.local_version}",
+            f"Manifest: {self.manifest_url or '—'}",
+            f"Источник: {self.manifest_source}",
+            f"Версия на сервере: {self.remote_version or '—'}",
+            f"Обновление нужно: {'да' if self.update_available else 'нет'}",
+            f"Ссылка на exe: {'OK' if self.download_reachable else 'нет'}",
+        ]
+        if self.download_bytes is not None:
+            lines.append(f"Размер exe: {self.download_bytes} байт")
+        for e in self.errors:
+            lines.append(f"! {e}")
+        return lines
 
 
 def is_frozen_app() -> bool:
@@ -98,6 +132,7 @@ def _parse_manifest_data(data: dict, base_dir: Path | None) -> UpdateInfo | None
         notes=notes,
         file_name=file_name or DEFAULT_RELEASE_EXE_NAME,
         sha256=sha256,
+        source="local",
     )
 
 
@@ -109,46 +144,281 @@ def _load_manifest_bytes(raw: bytes, base_dir: Path | None) -> UpdateInfo | None
     return _parse_manifest_data(data, base_dir)
 
 
-def fetch_manifest(timeout: float = 20.0) -> UpdateInfo | None:
-    exe_dir = running_executable().parent
-    local = exe_dir / "version.json"
-    if local.is_file():
-        try:
-            info = _load_manifest_bytes(local.read_bytes(), exe_dir)
-            if info:
-                return info
-        except OSError:
-            pass
+def effective_local_version() -> str:
+    override = os.environ.get("SCALY_UPDATE_TEST_VERSION", "").strip()
+    if override:
+        return override
+    return __version__
 
-    url = resolve_manifest_url()
-    if not url:
+
+def _fetch_local_manifest(exe_dir: Path) -> UpdateInfo | None:
+    local = exe_dir / "version.json"
+    if not local.is_file():
         return None
+    try:
+        info = _load_manifest_bytes(local.read_bytes(), exe_dir)
+        if info:
+            return UpdateInfo(
+                version=info.version,
+                download_url=info.download_url,
+                notes=info.notes,
+                file_name=info.file_name,
+                sha256=info.sha256,
+                source="local",
+            )
+    except OSError:
+        pass
+    return None
+
+
+_GH_RAW = re.compile(
+    r"^https://raw\.githubusercontent\.com/([^/]+)/([^/]+)/([^/]+)/(.+?)$"
+)
+
+
+def _fetch_github_api_manifest(url: str, timeout: float) -> bytes | None:
+    m = _GH_RAW.match(url.split("?", 1)[0])
+    if not m:
+        return None
+    user, repo, branch, path = m.groups()
+    api = (
+        f"https://api.github.com/repos/{user}/{repo}/contents/{path}?ref={branch}"
+    )
+    req = urllib.request.Request(
+        api,
+        headers={
+            "User-Agent": f"SCALY-Cleaner/{__version__}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+        content = str(payload.get("content", "")).replace("\n", "")
+        if payload.get("encoding") == "base64" and content:
+            return base64.b64decode(content)
+    except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError, ValueError):
+        return None
+    return None
+
+
+def _fetch_remote_manifest(
+    url: str, exe_dir: Path, timeout: float
+) -> tuple[UpdateInfo | None, str | None]:
     if url.startswith("file:"):
         try:
             path = Path(urlparse(url).path)
             if path.is_file():
-                return _load_manifest_bytes(path.read_bytes(), path.parent)
-        except OSError:
-            return None
-        return None
+                info = _load_manifest_bytes(path.read_bytes(), path.parent)
+                if info:
+                    return (
+                        UpdateInfo(
+                            version=info.version,
+                            download_url=info.download_url,
+                            notes=info.notes,
+                            file_name=info.file_name,
+                            sha256=info.sha256,
+                            source="remote",
+                        ),
+                        None,
+                    )
+        except OSError as e:
+            return None, str(e)
+        return None, "file manifest missing"
 
+    raw = _fetch_github_api_manifest(url, timeout)
+    if raw is None:
+        bust = url if "?" in url else f"{url}?t={int(time.time())}"
+        req = urllib.request.Request(
+            bust,
+            headers={
+                "User-Agent": f"SCALY-Cleaner/{__version__}",
+                "Cache-Control": "no-cache",
+            },
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                raw = resp.read()
+        except urllib.error.HTTPError as e:
+            return None, f"HTTP {e.code}"
+        except (urllib.error.URLError, TimeoutError, OSError) as e:
+            return None, str(e)
+    info = _load_manifest_bytes(raw, exe_dir)
+    if not info:
+        return None, "invalid manifest json"
+    return (
+        UpdateInfo(
+            version=info.version,
+            download_url=info.download_url,
+            notes=info.notes,
+            file_name=info.file_name,
+            sha256=info.sha256,
+            source="remote",
+        ),
+        None,
+    )
+
+
+def fetch_github_latest_release(timeout: float = 20.0) -> UpdateInfo | None:
+    slug = github_repo_slug()
+    if not slug:
+        return None
+    user, repo = slug
+    api = f"https://api.github.com/repos/{user}/{repo}/releases/latest"
     req = urllib.request.Request(
-        url,
-        headers={"User-Agent": f"SCALY-Cleaner/{__version__}"},
+        api,
+        headers={
+            "User-Agent": f"SCALY-Cleaner/{__version__}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+        },
     )
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
-            raw = resp.read()
-    except (urllib.error.URLError, TimeoutError, OSError):
+            data = json.loads(resp.read().decode("utf-8"))
+    except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError):
         return None
-    return _load_manifest_bytes(raw, exe_dir)
+    tag = str(data.get("tag_name", "")).strip()
+    ver = tag.lstrip("vV")
+    if not ver:
+        return None
+    exe_name = DEFAULT_RELEASE_EXE_NAME
+    download_url = ""
+    for asset in data.get("assets") or []:
+        name = str(asset.get("name", ""))
+        if name.lower() == exe_name.lower():
+            download_url = str(asset.get("browser_download_url", ""))
+            break
+    if not download_url:
+        for asset in data.get("assets") or []:
+            if str(asset.get("name", "")).lower().endswith(".exe"):
+                download_url = str(asset.get("browser_download_url", ""))
+                break
+    if not download_url.startswith("http"):
+        return None
+    notes = str(data.get("body") or data.get("name") or "").strip()[:800]
+    return UpdateInfo(
+        version=ver,
+        download_url=download_url,
+        notes=notes,
+        file_name=exe_name,
+        sha256=None,
+        source="github-release",
+    )
+
+
+def fetch_manifest(timeout: float = 20.0) -> UpdateInfo | None:
+    latest = fetch_github_latest_release(timeout)
+    if latest:
+        return latest
+
+    exe_dir = running_executable().parent
+    url = resolve_manifest_url()
+    if url:
+        remote, _err = _fetch_remote_manifest(url, exe_dir, timeout)
+        if remote:
+            return remote
+    if is_frozen_app():
+        return None
+    return _fetch_local_manifest(exe_dir)
+
+
+def probe_download(url: str, timeout: float = 25.0) -> tuple[bool, int | None, str | None]:
+    if _is_local_path(url):
+        p = Path(url)
+        if p.is_file():
+            return True, p.stat().st_size, None
+        return False, None, "local file missing"
+    req = urllib.request.Request(
+        url,
+        headers={
+            "User-Agent": f"SCALY-Cleaner/{__version__}",
+            "Range": "bytes=0-0",
+        },
+        method="GET",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            cr = resp.headers.get("Content-Range", "")
+            if "/" in cr:
+                total = cr.split("/")[-1].strip()
+                if total.isdigit():
+                    return True, int(total), None
+            size = resp.headers.get("Content-Length")
+            if size and size.isdigit():
+                n = int(size)
+                if n > 1:
+                    return True, n, None
+            return True, None, None
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            return False, None, "HTTP 404"
+        return False, None, f"HTTP {e.code}"
+    except (urllib.error.URLError, TimeoutError, OSError) as e:
+        return False, None, str(e)
+
+
+def diagnose_update(timeout: float = 20.0) -> UpdateDiagnosis:
+    local = effective_local_version()
+    exe_dir = running_executable().parent
+    url = resolve_manifest_url()
+    slug = github_repo_slug()
+    release_api = (
+        f"https://api.github.com/repos/{slug[0]}/{slug[1]}/releases/latest"
+        if slug
+        else None
+    )
+    errors: list[str] = []
+    manifest: UpdateInfo | None = None
+    source = "none"
+
+    manifest = fetch_github_latest_release(timeout)
+    if manifest:
+        source = "github-release"
+    elif release_api:
+        errors.append("github releases/latest unavailable")
+
+    if manifest is None and url:
+        manifest, err = _fetch_remote_manifest(url, exe_dir, timeout)
+        if manifest:
+            source = "remote"
+        elif err:
+            errors.append(f"remote manifest: {err}")
+
+    if manifest is None and not is_frozen_app():
+        manifest = _fetch_local_manifest(exe_dir)
+        if manifest:
+            source = "local"
+    if manifest is None:
+        errors.append("update source not found")
+
+    remote_ver = manifest.version if manifest else None
+    need = bool(manifest and version_gt(manifest.version, local))
+    dl_ok = False
+    dl_size: int | None = None
+    if manifest:
+        dl_ok, dl_size, dl_err = probe_download(manifest.download_url, timeout)
+        if dl_err:
+            errors.append(f"download: {dl_err}")
+
+    return UpdateDiagnosis(
+        local_version=local,
+        manifest_url=release_api or url,
+        manifest_source=source,
+        remote_version=remote_ver,
+        update_available=need,
+        download_reachable=dl_ok,
+        download_bytes=dl_size,
+        errors=errors,
+    )
 
 
 def check_for_update() -> UpdateInfo | None:
     manifest = fetch_manifest()
     if manifest is None:
         return None
-    if version_gt(manifest.version, __version__):
+    if version_gt(manifest.version, effective_local_version()):
         return manifest
     return None
 

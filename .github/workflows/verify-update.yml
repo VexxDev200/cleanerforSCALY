@@ -1,0 +1,26 @@
+name: Verify auto-update
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Manifest version matches package
+        shell: pwsh
+        run: |
+          $pkg = (Select-String scalyclean/__init__.py -Pattern '__version__ = "([^"]+)"').Matches.Groups[1].Value
+          $json = Get-Content releases/version.json -Raw | ConvertFrom-Json
+          if ($json.version -ne $pkg) {
+            Write-Error "releases/version.json version $($json.version) != package $pkg. Run publish_all.bat"
+            exit 1
+          }
+      - run: python tools/verify_auto_update.py
