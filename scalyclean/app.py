@@ -221,16 +221,19 @@ class ScalyCleanerApp(ctk.CTk):
         threading.Thread(target=work, daemon=True).start()
 
     def _show_update_diagnosis(self, diag, info) -> None:
-        for line in diag.summary_lines():
+        for line in diag.public_summary_lines(include_debug=True):
             self.log(f"[Обновление] {line}")
-        text = "\n".join(diag.summary_lines())
+        text = "\n".join(diag.public_summary_lines(include_debug=False))
         if info:
             self._offer_update(info)
-            messagebox.showinfo("Обновления", text + "\n\nМожно нажать «Скачать обновление» в шапке.")
+            messagebox.showinfo("Обновления", text + "\n\nНажми «Обновить» в шапке.")
         elif diag.errors:
-            messagebox.showwarning("Обновления", text)
+            messagebox.showwarning(
+                "Обновления",
+                text + "\n\n" + "\n".join(diag.errors),
+            )
         else:
-            messagebox.showinfo("Обновления", text + "\n\nУ тебя последняя версия.")
+            messagebox.showinfo("Обновления", text)
         self._status.configure(text="Готово")
 
     def _offer_update(self, info) -> None:

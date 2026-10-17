@@ -1,22 +1,16 @@
-"""Вкладка: проверка и тест автообновления."""
+"""Вкладка: проверка обновлений."""
 
 from __future__ import annotations
 
 import os
 import threading
-import tkinter as tk
 from tkinter import messagebox
 
 import customtkinter as ctk
 
 from scalyclean import __version__
 from scalyclean.core.branding import load_logo_ctk
-from scalyclean.core.updater import (
-    check_for_update,
-    diagnose_update,
-    effective_local_version,
-    resolve_manifest_url,
-)
+from scalyclean.core.updater import check_for_update, diagnose_update, effective_local_version
 
 
 class UpdatePanel(ctk.CTkFrame):
@@ -39,18 +33,17 @@ class UpdatePanel(ctk.CTkFrame):
 
         ctk.CTkLabel(
             self,
-            text="Нужен только ScalyCleaner.exe. Обновления с GitHub Releases (latest) — автоматически.\n"
-            "Ты пушишь код в main — CI собирает релиз; у всех появится «Обновить».",
+            text="Достаточно одного exe. Новые версии подтягиваются с GitHub автоматически.",
             justify="left",
             text_color="#9aa0a6",
         ).pack(anchor="w", padx=12, pady=8)
 
         info = ctk.CTkFrame(self)
         info.pack(fill="x", padx=12, pady=8)
-        self._ver_label = ctk.CTkLabel(info, text=f"Текущая версия: v{__version__}", anchor="w")
+        self._ver_label = ctk.CTkLabel(info, text=f"Твоя версия: v{__version__}", anchor="w")
         self._ver_label.pack(fill="x", padx=12, pady=6)
-        self._url_label = ctk.CTkLabel(info, text="Manifest: …", anchor="w")
-        self._url_label.pack(fill="x", padx=12, pady=6)
+        self._server_label = ctk.CTkLabel(info, text="На сервере: …", anchor="w")
+        self._server_label.pack(fill="x", padx=12, pady=6)
         self._result_label = ctk.CTkLabel(info, text="Нажми «Проверить сейчас»", anchor="w")
         self._result_label.pack(fill="x", padx=12, pady=6)
 
@@ -70,13 +63,11 @@ class UpdatePanel(ctk.CTkFrame):
         self._refresh_labels()
 
     def _refresh_labels(self) -> None:
-        url = resolve_manifest_url() or "—"
-        self._url_label.configure(text=f"Manifest: {url}")
         local = effective_local_version()
         extra = ""
         if local != __version__:
-            extra = f" (тестовая эмуляция v{local})"
-        self._ver_label.configure(text=f"Текущая версия: v{__version__}{extra}")
+            extra = f" (тест v{local})"
+        self._ver_label.configure(text=f"Твоя версия: v{__version__}{extra}")
 
     def run_check(self) -> None:
         self._on_status("Проверка обновлений…")
@@ -91,27 +82,29 @@ class UpdatePanel(ctk.CTkFrame):
     def run_test_old_client(self) -> None:
         os.environ["SCALY_UPDATE_TEST_VERSION"] = "1.0.0"
         self._refresh_labels()
-        self._on_log("[Обновление] Тест: эмуляция клиента v1.0.0")
+        self._on_log("[Обновление] Тест: клиент v1.0.0")
         self.run_check()
 
     def _show(self, diag, info) -> None:
         self._refresh_labels()
-        for line in diag.summary_lines():
+        self._server_label.configure(text=f"На сервере: v{diag.remote_version or '—'}")
+        for line in diag.public_summary_lines(include_debug=True):
             self._on_log(f"[Обновление] {line}")
+        public = "\n".join(diag.public_summary_lines(include_debug=False))
         if diag.update_available and info:
             self._result_label.configure(
-                text=f"Доступно обновление v{info.version}",
+                text=f"Доступно v{info.version}",
                 text_color="#4ade80",
             )
             self._on_update_offered(info)
-            messagebox.showinfo(
-                "Обновление",
-                "\n".join(diag.summary_lines()) + "\n\nНажми «Обновить» в шапке окна.",
-            )
+            messagebox.showinfo("Обновление", public)
         elif diag.errors:
             self._result_label.configure(text="Ошибка проверки", text_color="#f87171")
-            messagebox.showwarning("Обновление", "\n".join(diag.summary_lines()))
+            messagebox.showwarning(
+                "Обновление",
+                public + "\n\n" + "\n".join(diag.errors),
+            )
         else:
-            self._result_label.configure(text="Установлена последняя версия", text_color="#9aa0a6")
-            messagebox.showinfo("Обновление", "\n".join(diag.summary_lines()))
+            self._result_label.configure(text="Последняя версия", text_color="#9aa0a6")
+            messagebox.showinfo("Обновление", public)
         self._on_status("Готово")

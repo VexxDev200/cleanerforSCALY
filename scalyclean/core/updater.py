@@ -50,18 +50,24 @@ class UpdateDiagnosis:
     errors: list[str] = field(default_factory=list)
 
     def summary_lines(self) -> list[str]:
+        return self.public_summary_lines(include_debug=True)
+
+    def public_summary_lines(self, include_debug: bool = False) -> list[str]:
         lines = [
-            f"Локальная версия: {self.local_version}",
-            f"Manifest: {self.manifest_url or '—'}",
-            f"Источник: {self.manifest_source}",
-            f"Версия на сервере: {self.remote_version or '—'}",
-            f"Обновление нужно: {'да' if self.update_available else 'нет'}",
-            f"Ссылка на exe: {'OK' if self.download_reachable else 'нет'}",
+            f"Твоя версия: v{self.local_version}",
+            f"На сервере: v{self.remote_version or '—'}",
         ]
-        if self.download_bytes is not None:
-            lines.append(f"Размер exe: {self.download_bytes} байт")
-        for e in self.errors:
-            lines.append(f"! {e}")
+        if self.update_available:
+            lines.append("Доступно обновление — нажми «Обновить» в шапке.")
+        else:
+            lines.append("Установлена последняя версия.")
+        if include_debug:
+            lines.append(f"Источник: {self.manifest_source}")
+            lines.append(f"Ссылка на exe: {'OK' if self.download_reachable else 'нет'}")
+            if self.download_bytes is not None:
+                lines.append(f"Размер: {self.download_bytes} байт")
+            for e in self.errors:
+                lines.append(f"! {e}")
         return lines
 
 
@@ -308,20 +314,54 @@ def fetch_github_latest_release(timeout: float = 20.0) -> UpdateInfo | None:
     )
 
 
-def fetch_manifest(timeout: float = 20.0) -> UpdateInfo | None:
-    latest = fetch_github_latest_release(timeout)
-    if latest:
-        return latest
-
+def _fetch_manifest_json_remote(timeout: float) -> tuple[UpdateInfo | None, str | None]:
     exe_dir = running_executable().parent
     url = resolve_manifest_url()
-    if url:
-        remote, _err = _fetch_remote_manifest(url, exe_dir, timeout)
-        if remote:
-            return remote
+    if not url:
+        return None, "no manifest url"
+    raw = _fetch_github_api_manifest(url, timeout)
+    if raw is None:
+        remote, err = _fetch_remote_manifest(url, exe_dir, timeout)
+        return remote, err
+    info = _load_manifest_bytes(raw, exe_dir)
+    if not info:
+        return None, "invalid manifest"
+    return (
+        UpdateInfo(
+            version=info.version,
+            download_url=info.download_url,
+            notes=info.notes,
+            file_name=info.file_name,
+            sha256=info.sha256,
+            source="manifest",
+        ),
+        None,
+    )
+
+
+def _pick_newest(*items: UpdateInfo | None) -> UpdateInfo | None:
+    best: UpdateInfo | None = None
+    for info in items:
+        if info is None:
+            continue
+        if best is None or version_gt(info.version, best.version):
+            best = info
+    return best
+
+
+def fetch_best_available_update(timeout: float = 20.0) -> UpdateInfo | None:
+    release = fetch_github_latest_release(timeout)
+    manifest, _err = _fetch_manifest_json_remote(timeout)
+    best = _pick_newest(release, manifest)
+    if best:
+        return best
     if is_frozen_app():
         return None
-    return _fetch_local_manifest(exe_dir)
+    return _fetch_local_manifest(running_executable().parent)
+
+
+def fetch_manifest(timeout: float = 20.0) -> UpdateInfo | None:
+    return fetch_best_available_update(timeout)
 
 
 def probe_download(url: str, timeout: float = 25.0) -> tuple[bool, int | None, str | None]:
@@ -373,18 +413,16 @@ def diagnose_update(timeout: float = 20.0) -> UpdateDiagnosis:
     manifest: UpdateInfo | None = None
     source = "none"
 
-    manifest = fetch_github_latest_release(timeout)
+    release = fetch_github_latest_release(timeout)
+    manifest_json, m_err = _fetch_manifest_json_remote(timeout)
+    manifest = _pick_newest(release, manifest_json)
     if manifest:
-        source = "github-release"
-    elif release_api:
-        errors.append("github releases/latest unavailable")
-
-    if manifest is None and url:
-        manifest, err = _fetch_remote_manifest(url, exe_dir, timeout)
-        if manifest:
-            source = "remote"
-        elif err:
-            errors.append(f"remote manifest: {err}")
+        source = manifest.source
+    else:
+        if m_err:
+            errors.append(m_err)
+        if release_api:
+            errors.append("github releases unavailable")
 
     if manifest is None and not is_frozen_app():
         manifest = _fetch_local_manifest(exe_dir)
