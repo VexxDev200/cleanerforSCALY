@@ -52,3 +52,14 @@ def github_repo_slug() -> tuple[str, str] | None:
     if user and repo:
         return user, repo
     return None
+
+
+def github_release_exe_url(version: str, exe_name: str = DEFAULT_RELEASE_EXE_NAME) -> str | None:
+    slug = github_repo_slug()
+    if not slug:
+        return None
+    ver = version.strip().lstrip("vV")
+    if not ver:
+        return None
+    user, repo = slug
+    return f"https://github.com/{user}/{repo}/releases/download/v{ver}/{exe_name}"

@@ -1,7 +1,7 @@
 {
-  "version": "1.0.10",
-  "download_url": "https://github.com/VexxDev200/cleanerforSCALY/releases/download/v1.0.10/ScalyCleaner.exe",
+  "version": "1.0.11",
+  "download_url": "https://github.com/VexxDev200/cleanerforSCALY/releases/download/v1.0.11/ScalyCleaner.exe",
   "file_name": "ScalyCleaner.exe",
-  "notes": "v1.0.10 — тест автообновления.",
-  "sha256": "e482f99118403ab04a00c9ca12603d42790690397285111130d6f17f1a1845b9"
+  "notes": "v1.0.11 — исправлена проверка обновлений (не пишет «последняя», когда на сервере новее).",
+  "sha256": "879e26f4f9e1b53a56b2b4790ea512079d60fd36671b5ec9610c4f63dad2ba2f"
 }

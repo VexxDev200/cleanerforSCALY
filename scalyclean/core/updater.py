@@ -22,6 +22,7 @@ from scalyclean import __version__
 from scalyclean.core.update_config import (
     DEFAULT_RELEASE_EXE_NAME,
     UPDATE_MANIFEST_URL,
+    github_release_exe_url,
     github_repo_slug,
 )
 
@@ -64,6 +65,11 @@ class UpdateDiagnosis:
         ]
         if self.update_available:
             lines.append("Доступно обновление — нажми «Обновить» в шапке.")
+        elif self.remote_version and version_gt(self.remote_version, self.local_version):
+            lines.append(
+                f"На сервере новее (v{self.remote_version}) — нажми «Проверить снова» "
+                "или «Обновить» в шапке."
+            )
         else:
             lines.append("Установлена последняя версия.")
         if include_debug:
@@ -351,8 +357,20 @@ def fetch_github_release_for_version(version: str, timeout: float = 20.0) -> Upd
 
 
 def _release_asset_for_version(version: str, timeout: float) -> UpdateInfo | None:
-    """Скачивание только с GitHub Release (manifest download_url не доверяем)."""
     return fetch_github_release_for_version(version, timeout)
+
+
+def _manifest_install_candidate(manifest: UpdateInfo) -> UpdateInfo:
+    direct = github_release_exe_url(manifest.version, manifest.file_name)
+    url = direct or manifest.download_url
+    return UpdateInfo(
+        version=manifest.version,
+        download_url=url,
+        notes=manifest.notes,
+        file_name=manifest.file_name,
+        sha256=manifest.sha256,
+        source="manifest-direct" if direct else manifest.source,
+    )
 
 
 def resolve_installable_update(timeout: float = UPDATE_NETWORK_TIMEOUT) -> UpdateInfo | None:
@@ -365,6 +383,7 @@ def resolve_installable_update(timeout: float = UPDATE_NETWORK_TIMEOUT) -> Updat
     if release and version_gt(release.version, local):
         candidates.append(release)
     if manifest and version_gt(manifest.version, local):
+        candidates.append(_manifest_install_candidate(manifest))
         tag_rel = _release_asset_for_version(manifest.version, timeout)
         if tag_rel:
             candidates.append(tag_rel)
@@ -526,12 +545,16 @@ def diagnose_update(timeout: float = 20.0) -> UpdateDiagnosis:
     if installable:
         _, dl_size, _ = probe_download(installable.download_url, timeout)
     elif manifest and version_gt(manifest.version, local):
-        _, _, dl_err = probe_download(manifest.download_url, timeout)
-        errors.append(
-            "новая версия в manifest, exe на GitHub ещё собирается — подожди 2–5 мин"
-        )
-        if dl_err:
-            errors.append(dl_err)
+        cand = _manifest_install_candidate(manifest)
+        ok, _, dl_err = probe_download(cand.download_url, timeout)
+        if not ok:
+            errors.append(
+                "Обновление v"
+                f"{manifest.version} есть на сервере, но скачать не вышло — "
+                "проверь интернет и нажми «Проверить снова» через минуту."
+            )
+            if dl_err:
+                errors.append(dl_err)
 
     return UpdateDiagnosis(
         local_version=local,

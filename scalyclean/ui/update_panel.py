@@ -10,7 +10,12 @@ import customtkinter as ctk
 
 from scalyclean import __version__
 from scalyclean.core.branding import load_logo_ctk
-from scalyclean.core.updater import check_for_update, diagnose_update, effective_local_version
+from scalyclean.core.updater import (
+    check_for_update,
+    diagnose_update,
+    effective_local_version,
+    version_gt,
+)
 
 
 class UpdatePanel(ctk.CTkFrame):
@@ -33,7 +38,7 @@ class UpdatePanel(ctk.CTkFrame):
 
         ctk.CTkLabel(
             self,
-            text="Проверка GitHub ~1 мин · вкладка «Обновления» · возврат в окно. (тест v1.0.10)",
+            text="Проверка GitHub ~1 мин · вкладка «Обновления» · возврат в окно. (тест v1.0.11)",
             justify="left",
             text_color="#9aa0a6",
         ).pack(anchor="w", padx=12, pady=8)
@@ -91,6 +96,10 @@ class UpdatePanel(ctk.CTkFrame):
         for line in diag.public_summary_lines(include_debug=True):
             self._on_log(f"[Обновление] {line}")
         public = "\n".join(diag.public_summary_lines(include_debug=False))
+        newer_on_server = bool(
+            diag.remote_version
+            and version_gt(diag.remote_version, effective_local_version())
+        )
         if diag.update_available and info:
             self._result_label.configure(
                 text=f"Доступно v{info.version}",
@@ -98,6 +107,20 @@ class UpdatePanel(ctk.CTkFrame):
             )
             self._on_update_offered(info)
             messagebox.showinfo("Обновление", public)
+        elif info and newer_on_server:
+            self._result_label.configure(
+                text=f"Доступно v{info.version}",
+                text_color="#4ade80",
+            )
+            self._on_update_offered(info)
+            messagebox.showinfo("Обновление", public)
+        elif newer_on_server:
+            self._result_label.configure(
+                text=f"На сервере v{diag.remote_version}",
+                text_color="#fbbf24",
+            )
+            extra = "\n\n" + "\n".join(diag.errors) if diag.errors else ""
+            messagebox.showwarning("Обновление", public + extra)
         elif diag.errors:
             self._result_label.configure(text="Ошибка проверки", text_color="#f87171")
             messagebox.showwarning(
