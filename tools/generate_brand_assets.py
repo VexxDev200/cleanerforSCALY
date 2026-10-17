@@ -1,7 +1,8 @@
-"""PNG + ICO для exe/UI. Приоритет: assets/custom.ico → logo_source.png → запасная S."""
+"""Зелёная SCALY-иконка (октагон) для exe и UI. custom.ico — только если положишь сам."""
 
 from __future__ import annotations
 
+import math
 import shutil
 from pathlib import Path
 
@@ -10,12 +11,11 @@ from PIL import Image, ImageDraw, ImageFont
 ROOT = Path(__file__).resolve().parents[1]
 ASSETS = ROOT / "assets"
 
-ICO_CANDIDATES = ("custom.ico", "app.ico", "scaly.ico", "logo.ico")
-SOURCE_PNG = ("logo_source.png", "logo.png", "brand.png", "icon.png")
+ICO_OVERRIDE = ("custom.ico", "app.ico", "scaly.ico")
 
 
 def _font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
-    for name in ("segoeui.ttf", "arial.ttf", "calibri.ttf"):
+    for name in ("segoeui.ttf", "arialbd.ttf", "arial.ttf", "calibri.ttf"):
         try:
             return ImageFont.truetype(name, size)
         except OSError:
@@ -23,68 +23,47 @@ def _font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
     return ImageFont.load_default()
 
 
-def draw_logo_fallback(size: int) -> Image.Image:
+def _octagon_points(cx: float, cy: float, r: float) -> list[tuple[float, float]]:
+    return [
+        (
+            cx + r * math.cos(math.pi / 8 + i * 2 * math.pi / 8),
+            cy + r * math.sin(math.pi / 8 + i * 2 * math.pi / 8),
+        )
+        for i in range(8)
+    ]
+
+
+def draw_scaly_logo(size: int) -> Image.Image:
+    """Зелёный октагон + круг + S — как в штатной сборке ScalyCleaner."""
     img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
-    pad = max(2, size // 16)
-    d.ellipse(
-        (pad, pad, size - pad, size - pad),
+    cx = cy = size / 2
+    r_outer = size * 0.47
+    stroke = max(1, size // 48)
+    d.polygon(
+        _octagon_points(cx, cy, r_outer),
         fill="#0d9488",
         outline="#5eead4",
-        width=max(1, size // 64),
+        width=stroke,
     )
-    inner = size // 5
-    d.ellipse((inner, inner, size - inner, size - inner), fill="#115e59")
-    font = _font(int(size * 0.52))
+    r_inner = size * 0.34
+    d.ellipse(
+        (cx - r_inner, cy - r_inner, cx + r_inner, cy + r_inner),
+        fill="#115e59",
+        outline="#0f766e",
+        width=max(1, stroke // 2),
+    )
+    font = _font(int(size * 0.46))
     text = "S"
     bbox = d.textbbox((0, 0), text, font=font)
     tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
     d.text(
-        ((size - tw) // 2 - bbox[0], (size - th) // 2 - bbox[1] - size // 32),
+        (cx - tw / 2 - bbox[0], cy - th / 2 - bbox[1] - size * 0.02),
         text,
         fill="#ecfdf5",
         font=font,
     )
     return img
-
-
-def _key_out_dark_bg(im: Image.Image) -> Image.Image:
-    im = im.convert("RGBA")
-    w, h = im.size
-    corners = [im.getpixel((0, 0)), im.getpixel((w - 1, 0)), im.getpixel((0, h - 1))]
-    bg = corners[0][:3]
-
-    def near_bg(px: tuple) -> bool:
-        return all(abs(px[i] - bg[i]) < 28 for i in range(3))
-
-    px = im.load()
-    for y in range(h):
-        for x in range(w):
-            if near_bg(px[x, y]):
-                px[x, y] = (0, 0, 0, 0)
-    box = im.getbbox()
-    return im.crop(box) if box else im
-
-
-def load_master_png() -> Image.Image | None:
-    for name in SOURCE_PNG:
-        path = ASSETS / name
-        if not path.is_file():
-            continue
-        im = Image.open(path).convert("RGBA")
-        if name == "logo_source.png" or im.size[0] < 400:
-            im = _key_out_dark_bg(im)
-        side = min(im.size)
-        if im.size[0] != im.size[1]:
-            left = (im.size[0] - side) // 2
-            top = (im.size[1] - side) // 2
-            im = im.crop((left, top, left + side, top + side))
-        if side < 512:
-            im = im.resize((512, 512), Image.Resampling.LANCZOS)
-        elif side > 512:
-            im = im.resize((512, 512), Image.Resampling.LANCZOS)
-        return im
-    return None
 
 
 def logo_at_size(master: Image.Image, size: int) -> Image.Image:
@@ -110,57 +89,38 @@ def write_ico_from_png(master: Image.Image) -> None:
     )
 
 
-def copy_user_ico() -> Path | None:
-    for name in ICO_CANDIDATES:
+def apply_user_ico() -> bool:
+    for name in ICO_OVERRIDE:
         src = ASSETS / name
-        if not src.is_file() or src.stat().st_size < 500:
-            continue
-        if name != "logo.ico":
+        if src.is_file() and src.stat().st_size > 500:
             shutil.copy2(src, ASSETS / "logo.ico")
-        return src
-    return None
-
-
-def pngs_from_ico(ico_path: Path) -> Image.Image:
-    im = Image.open(ico_path)
-    im.load()
-    if getattr(im, "n_frames", 1) > 1:
-        best = im
-        best_area = 0
-        for i in range(im.n_frames):
-            im.seek(i)
-            frame = im.copy().convert("RGBA")
-            area = frame.size[0] * frame.size[1]
-            if area > best_area:
-                best_area = area
-                best = frame
-        master = best.resize((512, 512), Image.Resampling.LANCZOS)
-    else:
-        master = im.convert("RGBA").resize((512, 512), Image.Resampling.LANCZOS)
-    write_png_set(master)
-    if ico_path.name != "logo.ico":
-        shutil.copy2(ico_path, ASSETS / "logo.ico")
-    return master
+            im = Image.open(src)
+            im.load()
+            best = im
+            if getattr(im, "n_frames", 1) > 1:
+                best_area = 0
+                for i in range(im.n_frames):
+                    im.seek(i)
+                    frame = im.copy().convert("RGBA")
+                    area = frame.size[0] * frame.size[1]
+                    if area > best_area:
+                        best_area = area
+                        best = frame
+            master = best.convert("RGBA").resize((512, 512), Image.Resampling.LANCZOS)
+            write_png_set(master)
+            print(f"Brand assets: exe icon from {name}")
+            return True
+    return False
 
 
 def main() -> None:
     ASSETS.mkdir(parents=True, exist_ok=True)
-    user_ico = copy_user_ico()
-    if user_ico and user_ico.name in ("custom.ico", "app.ico", "scaly.ico"):
-        pngs_from_ico(user_ico)
-        print(f"Brand assets: {ASSETS} (exe icon from {user_ico.name})")
+    if apply_user_ico():
         return
-
-    master = load_master_png()
-    if master is None:
-        master = draw_logo_fallback(512)
-        print("Brand assets: fallback S (положи assets/logo_source.png или assets/custom.ico)")
-    else:
-        src = next(ASSETS / n for n in SOURCE_PNG if (ASSETS / n).is_file())
-        print(f"Brand assets: from {src.name}")
-
+    master = draw_scaly_logo(512)
     write_png_set(master)
     write_ico_from_png(master)
+    print("Brand assets: green Scaly octagon (default)")
 
 
 if __name__ == "__main__":
