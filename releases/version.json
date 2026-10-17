@@ -1,7 +1,7 @@
 {
-  "version": "1.0.5",
-  "download_url": "https://github.com/VexxDev200/cleanerforSCALY/releases/download/v1.0.5/ScalyCleaner.exe",
+  "version": "1.0.6",
+  "download_url": "https://github.com/VexxDev200/cleanerforSCALY/releases/download/v1.0.6/ScalyCleaner.exe",
   "file_name": "ScalyCleaner.exe",
   "notes": "Home tab, PC health score, quick clean, clean history.",
-  "sha256": "f4f592a1a916835214d36191908ea1c5d0fd44c969baebfb8169c69a1b94d539"
+  "sha256": "ab668c8683d060b0f3b9c20dc3a6e4406907b9a3f1d7938826c5bbd931e3f633"
 }
