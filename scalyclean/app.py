@@ -21,8 +21,10 @@ from scalyclean.modules.disk_cleaner import clean_targets, scan_all
 from scalyclean.modules.disk_targets import all_disk_targets, targets_for_drive
 from scalyclean.modules.volumes import default_drive
 from scalyclean.core.branding import apply_window_icon, load_logo_ctk
+from scalyclean.core.clean_history import append_history
 from scalyclean.ui.analyzer_panel import AnalyzerPanel
 from scalyclean.ui.games_panel import GamesPanel
+from scalyclean.ui.home_panel import HomePanel
 from scalyclean.ui.update_panel import UpdatePanel
 from scalyclean.modules.ram_cleaner import clean_ram, get_ram_stats
 from scalyclean.modules.system_cleaner import clean_old_windows_logs, start_dism_component_cleanup
@@ -128,6 +130,7 @@ class ScalyCleanerApp(ctk.CTk):
         self._tabs = ctk.CTkTabview(self)
         self._tabs.pack(fill="both", expand=True, padx=16, pady=4)
 
+        tab_home = self._tabs.add("Главная")
         tab_analyze = self._tabs.add("Анализ")
         tab_games = self._tabs.add("Игры")
         tab_disk = self._tabs.add("Очистка")
@@ -135,6 +138,14 @@ class ScalyCleanerApp(ctk.CTk):
         tab_vram = self._tabs.add("VRAM / GPU")
         tab_all = self._tabs.add("Всё сразу")
         tab_updates = self._tabs.add("Обновления")
+
+        self._home = HomePanel(
+            tab_home,
+            on_quick_clean=self.run_quick_clean,
+            on_refresh_stats=self.refresh_stats,
+            on_log=self.log,
+        )
+        self._home.pack(fill="both", expand=True, padx=4, pady=4)
 
         self._analyzer = AnalyzerPanel(
             tab_analyze,
@@ -150,7 +161,7 @@ class ScalyCleanerApp(ctk.CTk):
         )
         self._games.pack(fill="both", expand=True, padx=4, pady=4)
 
-        self._tabs.set("Игры")
+        self._tabs.set("Главная")
 
         self._build_disk_tab(tab_disk)
         self._build_ram_tab(tab_ram)
@@ -452,6 +463,13 @@ class ScalyCleanerApp(ctk.CTk):
         names = ", ".join(a.name for a in vr.adapters[:2]) or "GPU"
         self._vram_label.configure(text=f"GPU кэши: {format_bytes(vr.cache_size)} · {names}")
         self._refresh_gpu_text(vr)
+        if hasattr(self, "_home"):
+            disk_pct = 0.0
+            try:
+                disk_pct = float(psutil.disk_usage(drive).percent)
+            except OSError:
+                pass
+            self._home.refresh_display(ram.percent, disk_pct, vr.cache_size)
 
     def _refresh_gpu_text(self, vr) -> None:
         lines = ["=== Адаптеры ==="]
@@ -524,6 +542,33 @@ class ScalyCleanerApp(ctk.CTk):
         self.log(f"Диск: освобождено ~{format_bytes(freed)}")
         self.refresh_stats()
         self.scan_disk()
+
+    def run_quick_clean(self) -> None:
+        if self._busy:
+            return
+        self.set_busy(True, "Быстрая очистка…")
+        gentle = self._gentle_var.get()
+
+        def work() -> None:
+            rep = clean_ram(gentle=gentle)
+            ram_delta = max(0, rep.after.available - rep.before.available)
+            vram = clean_vram_caches(gentle=gentle)
+            flush_dwm()
+            safe_ids = {t.id for t in targets_for_drive(self._current_drive) if not t.risky}
+            disk = clean_targets(safe_ids, admin=is_admin())
+            disk_freed = sum(r.bytes_freed for r in disk)
+            total = ram_delta + vram.bytes_freed + disk_freed
+            append_history(total, "quick")
+            self.after(0, lambda: self._finish_quick(rep, vram, disk_freed, total))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _finish_quick(self, rep, vram, disk_freed: int, total: int) -> None:
+        self._finish_ram(rep)
+        self.log(f"[Быстро] GPU +{format_bytes(vram.bytes_freed)}, диск +{format_bytes(disk_freed)}")
+        self.log(f"[Быстро] всего ~{format_bytes(total)}")
+        self.set_busy(False, "Готово")
+        self.refresh_stats()
 
     def run_ram_clean(self) -> None:
         if self._busy:
