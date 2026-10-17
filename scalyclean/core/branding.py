@@ -19,6 +19,13 @@ def asset_path(name: str) -> Path:
 
 
 def apply_window_icon(window) -> None:
+    if sys.platform == "win32":
+        ico = asset_path("logo.ico")
+        if ico.is_file():
+            try:
+                window.iconbitmap(default=str(ico))
+            except Exception:
+                pass
     path = asset_path("logo_64.png")
     if not path.is_file():
         path = asset_path("logo_48.png")

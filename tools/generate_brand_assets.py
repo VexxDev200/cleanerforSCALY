@@ -1,4 +1,4 @@
-"""Генерация logo PNG + ICO для SCALY Cleaner."""
+"""Генерация logo PNG + ICO для SCALY Cleaner (из assets/logo_source.png или запасной S)."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 ROOT = Path(__file__).resolve().parents[1]
 ASSETS = ROOT / "assets"
+SOURCE_NAMES = ("logo_source.png", "logo.png", "brand.png", "icon.png")
 
 
 def _font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
@@ -19,7 +20,7 @@ def _font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
     return ImageFont.load_default()
 
 
-def draw_logo(size: int) -> Image.Image:
+def draw_logo_fallback(size: int) -> Image.Image:
     img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
     pad = max(2, size // 16)
@@ -47,23 +48,47 @@ def draw_logo(size: int) -> Image.Image:
     return img
 
 
+def load_master_logo() -> Image.Image:
+    for name in SOURCE_NAMES:
+        path = ASSETS / name
+        if path.is_file():
+            im = Image.open(path).convert("RGBA")
+            side = min(im.size)
+            if im.size[0] != im.size[1]:
+                left = (im.size[0] - side) // 2
+                top = (im.size[1] - side) // 2
+                im = im.crop((left, top, left + side, top + side))
+            if side < 256:
+                im = im.resize((512, 512), Image.Resampling.LANCZOS)
+            return im
+    return draw_logo_fallback(512)
+
+
+def logo_at_size(master: Image.Image, size: int) -> Image.Image:
+    if master.size[0] == size:
+        return master.copy()
+    return master.resize((size, size), Image.Resampling.LANCZOS)
+
+
 def main() -> None:
     ASSETS.mkdir(parents=True, exist_ok=True)
-    sizes_png = (32, 48, 64, 128, 256)
-    images: list[Image.Image] = []
-    for s in sizes_png:
-        im = draw_logo(s)
-        im.save(ASSETS / f"logo_{s}.png")
-        images.append(im)
+    master = load_master_logo()
+    if master.size != (512, 512):
+        master = master.resize((512, 512), Image.Resampling.LANCZOS)
+    master.save(ASSETS / "logo_512.png")
+
+    for s in (32, 48, 64, 128, 256):
+        logo_at_size(master, s).save(ASSETS / f"logo_{s}.png")
+
     ico_sizes = [16, 32, 48, 64, 128, 256]
-    master = draw_logo(256).convert("RGBA")
-    master.save(
+    ico_master = logo_at_size(master, 256)
+    ico_master.save(
         ASSETS / "logo.ico",
         format="ICO",
         sizes=[(s, s) for s in ico_sizes],
     )
-    draw_logo(512).save(ASSETS / "logo_512.png")
-    print(f"Brand assets: {ASSETS}")
+    src = next((ASSETS / n for n in SOURCE_NAMES if (ASSETS / n).is_file()), None)
+    print(f"Brand assets: {ASSETS}" + (f" (from {src.name})" if src else " (fallback)"))
 
 
 if __name__ == "__main__":
