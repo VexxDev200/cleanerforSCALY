@@ -1,7 +1,7 @@
 {
-  "version": "1.0.11",
-  "download_url": "https://github.com/VexxDev200/cleanerforSCALY/releases/download/v1.0.11/ScalyCleaner.exe",
+  "version": "1.0.12",
+  "download_url": "https://github.com/VexxDev200/cleanerforSCALY/releases/download/v1.0.12/ScalyCleaner.exe",
   "file_name": "ScalyCleaner.exe",
-  "notes": "v1.0.11 — исправлена проверка обновлений (не пишет «последняя», когда на сервере новее).",
-  "sha256": "879e26f4f9e1b53a56b2b4790ea512079d60fd36671b5ec9610c4f63dad2ba2f"
+  "notes": "v1.0.12 — фикс «Failed to load Python DLL» (без UPX).",
+  "sha256": "42f219c6a25a2fb062d16daa7e59e15b4468f66c9b2fe7fee75552acecc984ec"
 }

@@ -1,5 +1,6 @@
 # -*- mode: python ; coding: utf-8 -*-
 import os
+import sys
 
 from PyInstaller.utils.hooks import collect_all, collect_submodules
 
@@ -22,6 +23,11 @@ tmp_ret = collect_all('customtkinter')
 datas += tmp_ret[0]
 binaries += tmp_ret[1]
 hiddenimports += tmp_ret[2]
+
+# python312.dll + VC runtime рядом с bootloader (меньше сбоев LoadLibrary в _MEI*)
+_py_dll = os.path.join(sys.base_prefix, f'python{sys.version_info.major}{sys.version_info.minor}.dll')
+if os.path.isfile(_py_dll):
+    binaries.append((_py_dll, '.'))
 
 a = Analysis(
     ['main.py'],
@@ -48,7 +54,7 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
+    upx=False,
     upx_exclude=[],
     runtime_tmpdir=None,
     console=False,

@@ -38,7 +38,7 @@ class UpdatePanel(ctk.CTkFrame):
 
         ctk.CTkLabel(
             self,
-            text="Проверка GitHub ~1 мин · вкладка «Обновления» · возврат в окно. (тест v1.0.11)",
+            text="Проверка GitHub ~1 мин · вкладка «Обновления» · возврат в окно. (тест v1.0.12)",
             justify="left",
             text_color="#9aa0a6",
         ).pack(anchor="w", padx=12, pady=8)
