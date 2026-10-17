@@ -66,7 +66,20 @@ def main() -> int:
         print("auto_deploy: only non-release files changed, skip")
         return 0
 
-    add = _run(["git", "add", "-A"])
+    paths_to_add: list[str] = []
+    for line in st.stdout.splitlines():
+        if len(line) < 4:
+            continue
+        path = line[3:].strip().replace("\\", "/")
+        if path == "releases/version.json":
+            continue
+        if any(path.startswith(p.rstrip("/")) or path == p.rstrip("/") for p in WATCH_PREFIXES):
+            paths_to_add.append(path)
+    if not paths_to_add:
+        print("auto_deploy: no release-tracked paths to commit")
+        return 0
+
+    add = _run(["git", "add", "--"] + paths_to_add)
     if add.returncode != 0:
         print(add.stderr)
         return add.returncode

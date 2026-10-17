@@ -1,16 +1,26 @@
 # -*- mode: python ; coding: utf-8 -*-
+import os
+
 from PyInstaller.utils.hooks import collect_all
 
-datas = []
+spec_dir = os.path.dirname(os.path.abspath(SPEC))
+assets_dir = os.path.join(spec_dir, 'assets')
+logo_ico = os.path.join(assets_dir, 'logo.ico')
+
+datas = [
+    (assets_dir, 'assets'),
+    (os.path.join(spec_dir, 'release_settings.json'), '.'),
+]
 binaries = []
 hiddenimports = ['PIL._tkinter_finder']
 tmp_ret = collect_all('customtkinter')
-datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
-
+datas += tmp_ret[0]
+binaries += tmp_ret[1]
+hiddenimports += tmp_ret[2]
 
 a = Analysis(
     ['main.py'],
-    pathex=[],
+    pathex=[spec_dir],
     binaries=binaries,
     datas=datas,
     hiddenimports=hiddenimports,
@@ -42,4 +52,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    icon=logo_ico if os.path.isfile(logo_ico) else None,
 )

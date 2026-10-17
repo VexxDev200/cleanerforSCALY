@@ -350,6 +350,11 @@ def fetch_github_release_for_version(version: str, timeout: float = 20.0) -> Upd
     return _update_info_from_release_json(data)
 
 
+def _release_asset_for_version(version: str, timeout: float) -> UpdateInfo | None:
+    """Скачивание только с GitHub Release (manifest download_url не доверяем)."""
+    return fetch_github_release_for_version(version, timeout)
+
+
 def resolve_installable_update(timeout: float = UPDATE_NETWORK_TIMEOUT) -> UpdateInfo | None:
     """Версия новее локальной и exe реально скачивается (не 404)."""
     local = effective_local_version()
@@ -360,10 +365,9 @@ def resolve_installable_update(timeout: float = UPDATE_NETWORK_TIMEOUT) -> Updat
     if release and version_gt(release.version, local):
         candidates.append(release)
     if manifest and version_gt(manifest.version, local):
-        tag_rel = fetch_github_release_for_version(manifest.version, timeout)
+        tag_rel = _release_asset_for_version(manifest.version, timeout)
         if tag_rel:
             candidates.append(tag_rel)
-        candidates.append(manifest)
 
     seen: set[str] = set()
     ordered = sorted(
@@ -444,33 +448,40 @@ def probe_download(url: str, timeout: float = 25.0) -> tuple[bool, int | None, s
         if p.is_file():
             return True, p.stat().st_size, None
         return False, None, "local file missing"
-    req = urllib.request.Request(
-        url,
-        headers={
-            "User-Agent": f"SCALY-Cleaner/{__version__}",
-            "Range": "bytes=0-0",
-        },
-        method="GET",
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            cr = resp.headers.get("Content-Range", "")
-            if "/" in cr:
-                total = cr.split("/")[-1].strip()
-                if total.isdigit():
-                    return True, int(total), None
-            size = resp.headers.get("Content-Length")
-            if size and size.isdigit():
-                n = int(size)
-                if n > 1:
-                    return True, n, None
-            return True, None, None
-    except urllib.error.HTTPError as e:
-        if e.code == 404:
-            return False, None, "HTTP 404"
-        return False, None, f"HTTP {e.code}"
-    except (urllib.error.URLError, TimeoutError, OSError) as e:
-        return False, None, str(e)
+    headers = {
+        "User-Agent": f"SCALY-Cleaner/{__version__}",
+        "Accept": "*/*",
+    }
+    for method in ("HEAD", "GET"):
+        req = urllib.request.Request(url, headers=headers, method=method)
+        if method == "GET":
+            headers_get = {**headers, "Range": "bytes=0-0"}
+            req = urllib.request.Request(url, headers=headers_get, method="GET")
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                size = resp.headers.get("Content-Length")
+                if size and size.isdigit():
+                    n = int(size)
+                    if n > 0:
+                        return True, n, None
+                cr = resp.headers.get("Content-Range", "")
+                if "/" in cr:
+                    total = cr.split("/")[-1].strip()
+                    if total.isdigit():
+                        return True, int(total), None
+                if method == "HEAD" and resp.status in (200, 302):
+                    return True, None, None
+                if method == "GET":
+                    return True, None, None
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                return False, None, "HTTP 404"
+            if method == "HEAD" and e.code in (405, 501):
+                continue
+            return False, None, f"HTTP {e.code}"
+        except (urllib.error.URLError, TimeoutError, OSError) as e:
+            return False, None, str(e)
+    return False, None, "unreachable"
 
 
 def diagnose_update(timeout: float = 20.0) -> UpdateDiagnosis:
@@ -646,8 +657,14 @@ def install_update(
 ) -> None:
     resolved = resolve_installable_update()
     if resolved is None:
+        rel = _release_asset_for_version(info.version, UPDATE_NETWORK_TIMEOUT)
+        if rel:
+            ok, _, _ = probe_download(rel.download_url, UPDATE_NETWORK_TIMEOUT)
+            if ok:
+                resolved = rel
+    if resolved is None:
         raise ValueError(
-            "Файл обновления на GitHub ещё не готов (404). Подожди пару минут и нажми снова."
+            "Релиз на GitHub ещё не выложен (404). Подожди 3–5 мин после пуша или скачай exe с Releases."
         )
     info = resolved
     tmp_dir = Path(tempfile.gettempdir()) / "ScalyCleaner_update"
