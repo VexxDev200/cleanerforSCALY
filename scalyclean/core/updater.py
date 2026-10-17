@@ -271,25 +271,7 @@ def _fetch_remote_manifest(
     )
 
 
-def fetch_github_latest_release(timeout: float = 20.0) -> UpdateInfo | None:
-    slug = github_repo_slug()
-    if not slug:
-        return None
-    user, repo = slug
-    api = f"https://api.github.com/repos/{user}/{repo}/releases/latest"
-    req = urllib.request.Request(
-        api,
-        headers={
-            "User-Agent": f"SCALY-Cleaner/{__version__}",
-            "Accept": "application/vnd.github+json",
-            "X-GitHub-Api-Version": "2022-11-28",
-        },
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-    except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError):
-        return None
+def _update_info_from_release_json(data: dict) -> UpdateInfo | None:
     tag = str(data.get("tag_name", "")).strip()
     ver = tag.lstrip("vV")
     if not ver:
@@ -317,6 +299,86 @@ def fetch_github_latest_release(timeout: float = 20.0) -> UpdateInfo | None:
         sha256=None,
         source="github-release",
     )
+
+
+def _github_api_get(url: str, timeout: float) -> dict | None:
+    req = urllib.request.Request(
+        url,
+        headers={
+            "User-Agent": f"SCALY-Cleaner/{__version__}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            return None
+        return None
+    except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError):
+        return None
+
+
+def fetch_github_latest_release(timeout: float = 20.0) -> UpdateInfo | None:
+    slug = github_repo_slug()
+    if not slug:
+        return None
+    user, repo = slug
+    data = _github_api_get(
+        f"https://api.github.com/repos/{user}/{repo}/releases/latest",
+        timeout,
+    )
+    if not data:
+        return None
+    return _update_info_from_release_json(data)
+
+
+def fetch_github_release_for_version(version: str, timeout: float = 20.0) -> UpdateInfo | None:
+    slug = github_repo_slug()
+    if not slug:
+        return None
+    user, repo = slug
+    tag = version.strip().lstrip("vV")
+    data = _github_api_get(
+        f"https://api.github.com/repos/{user}/{repo}/releases/tags/v{tag}",
+        timeout,
+    )
+    if not data:
+        return None
+    return _update_info_from_release_json(data)
+
+
+def resolve_installable_update(timeout: float = UPDATE_NETWORK_TIMEOUT) -> UpdateInfo | None:
+    """Версия новее локальной и exe реально скачивается (не 404)."""
+    local = effective_local_version()
+    release = fetch_github_latest_release(timeout)
+    manifest, _merr = _fetch_manifest_json_remote(timeout)
+
+    candidates: list[UpdateInfo] = []
+    if release and version_gt(release.version, local):
+        candidates.append(release)
+    if manifest and version_gt(manifest.version, local):
+        tag_rel = fetch_github_release_for_version(manifest.version, timeout)
+        if tag_rel:
+            candidates.append(tag_rel)
+        candidates.append(manifest)
+
+    seen: set[str] = set()
+    ordered = sorted(
+        candidates,
+        key=lambda i: parse_version(i.version),
+        reverse=True,
+    )
+    for info in ordered:
+        if info.version in seen:
+            continue
+        seen.add(info.version)
+        ok, _, _ = probe_download(info.download_url, timeout)
+        if ok:
+            return info
+    return None
 
 
 def _fetch_manifest_json_remote(timeout: float) -> tuple[UpdateInfo | None, str | None]:
@@ -443,14 +505,22 @@ def diagnose_update(timeout: float = 20.0) -> UpdateDiagnosis:
     if manifest is None:
         errors.append("update source not found")
 
+    installable = resolve_installable_update(timeout)
     remote_ver = manifest.version if manifest else None
-    need = bool(manifest and version_gt(manifest.version, local))
-    dl_ok = False
+    if installable:
+        remote_ver = installable.version
+    need = installable is not None
+    dl_ok = installable is not None
     dl_size: int | None = None
-    if manifest:
-        dl_ok, dl_size, dl_err = probe_download(manifest.download_url, timeout)
+    if installable:
+        _, dl_size, _ = probe_download(installable.download_url, timeout)
+    elif manifest and version_gt(manifest.version, local):
+        _, _, dl_err = probe_download(manifest.download_url, timeout)
+        errors.append(
+            "новая версия в manifest, exe на GitHub ещё собирается — подожди 2–5 мин"
+        )
         if dl_err:
-            errors.append(f"download: {dl_err}")
+            errors.append(dl_err)
 
     return UpdateDiagnosis(
         local_version=local,
@@ -465,12 +535,7 @@ def diagnose_update(timeout: float = 20.0) -> UpdateDiagnosis:
 
 
 def check_for_update() -> UpdateInfo | None:
-    manifest = fetch_manifest()
-    if manifest is None:
-        return None
-    if version_gt(manifest.version, effective_local_version()):
-        return manifest
-    return None
+    return resolve_installable_update()
 
 
 def _verify_sha256(path: Path, expected: str) -> bool:
@@ -579,6 +644,12 @@ def install_update(
     info: UpdateInfo,
     on_progress: ProgressCallback | None = None,
 ) -> None:
+    resolved = resolve_installable_update()
+    if resolved is None:
+        raise ValueError(
+            "Файл обновления на GitHub ещё не готов (404). Подожди пару минут и нажми снова."
+        )
+    info = resolved
     tmp_dir = Path(tempfile.gettempdir()) / "ScalyCleaner_update"
     tmp_dir.mkdir(parents=True, exist_ok=True)
     dest = tmp_dir / info.file_name

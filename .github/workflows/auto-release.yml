@@ -52,5 +52,9 @@ jobs:
         run: |
           VER=$(python -c "from scalyclean import __version__; print(__version__)")
           TAG="v${VER}"
-          gh release view "$TAG" 2>/dev/null && gh release upload "$TAG" dist/ScalyCleaner.exe "dist/ScalyCleaner-v${VER}-win64.zip" --clobber || \
-          gh release create "$TAG" dist/ScalyCleaner.exe "dist/ScalyCleaner-v${VER}-win64.zip" --title "SCALY Cleaner ${TAG}" --generate-notes
+          REPO="${{ github.repository }}"
+          if gh release view "$TAG" -R "$REPO" 2>/dev/null; then
+            gh release upload "$TAG" -R "$REPO" dist/ScalyCleaner.exe "dist/ScalyCleaner-v${VER}-win64.zip" --clobber
+          else
+            gh release create "$TAG" -R "$REPO" dist/ScalyCleaner.exe "dist/ScalyCleaner-v${VER}-win64.zip" --title "SCALY Cleaner ${TAG}" --generate-notes
+          fi
